@@ -81,6 +81,20 @@ app.get('/ads', async (req, res) => {
   }
 });
 
+app.post('/ads', async (req, res) => {
+  const { title, description, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO ads (title, description, image_url) VALUES ($1, $2, $3) RETURNING *',
+      [title, description, image_url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('❌ Error inserting ad:', err.message);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 6543;
 app.listen(PORT, () => {
