@@ -61,15 +61,21 @@ app.get('/ads', async (req, res) => {
 })
 
 app.post('/ads', verifyAuth, async (req, res) => {
-  const { title, description, image_url, category, extra } = req.body
+  const { title, description, images, category, extra } = req.body
   const userId = req.user.uid
 
   try {
     const insertAd = await pool.query(
       'INSERT INTO ads (title, description, image_url, category, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [title, description, image_url, category, userId]
+      [title, description, images[0], category, userId]
     )
     const adId = insertAd.rows[0].id
+
+    // Save extra images (if more than one)
+    if (images.length > 1) {
+      const values = images.slice(1).map((url, idx) => `(${adId}, '${url}')`).join(',')
+      await pool.query(`INSERT INTO ad_images (ad_id, url) VALUES ${values}`)
+    }
 
     if (category === 'car') {
       await pool.query('INSERT INTO car_ads (ad_id, model_year, doors, seats) VALUES ($1, $2, $3, $4)', [adId, extra.model_year, extra.doors, extra.seats])
