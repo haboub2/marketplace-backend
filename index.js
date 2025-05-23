@@ -60,6 +60,34 @@ app.get('/ads', async (req, res) => {
   }
 })
 
+app.get('/ads/:id', async (req, res) => {
+  const adId = req.params.id
+  try {
+    const adResult = await pool.query(`
+      SELECT a.*, ca.model_year, ca.doors, ca.seats,
+             ea.brand, ea.specs,
+             ra.area, ra.rooms, ra.price AS real_estate_price,
+             ja.job_title, ja.salary, ja.employment_type
+      FROM ads a
+      LEFT JOIN car_ads ca ON ca.ad_id = a.id
+      LEFT JOIN electronics_ads ea ON ea.ad_id = a.id
+      LEFT JOIN real_estate_ads ra ON ra.ad_id = a.id
+      LEFT JOIN job_ads ja ON ja.ad_id = a.id
+      WHERE a.id = $1
+    `, [adId])
+
+    if (adResult.rows.length === 0) return res.status(404).json({ error: 'Ad not found' })
+
+    const imageResult = await pool.query('SELECT url FROM ad_images WHERE ad_id = $1', [adId])
+    const images = imageResult.rows.map(row => row.url)
+
+    res.json({ ad: adResult.rows[0], images })
+  } catch (err) {
+    console.error('Failed to fetch ad by ID', err)
+    res.status(500).json({ error: 'Failed to fetch ad' })
+  }
+})
+
 app.post('/ads', verifyAuth, async (req, res) => {
   const { title, description, images, category, extra } = req.body
   const userId = req.user.uid
@@ -71,9 +99,8 @@ app.post('/ads', verifyAuth, async (req, res) => {
     )
     const adId = insertAd.rows[0].id
 
-    // Save extra images (if more than one)
     if (images.length > 1) {
-      const values = images.slice(1).map((url, idx) => `(${adId}, '${url}')`).join(',')
+      const values = images.slice(1).map((url) => `(${adId}, '${url.replace(/'/g, "''")}')`).join(',')
       await pool.query(`INSERT INTO ad_images (ad_id, url) VALUES ${values}`)
     }
 
@@ -93,6 +120,43 @@ app.post('/ads', verifyAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to insert ad' })
   }
 })
+
+app.put('/ads/:id', verifyAuth, async (req, res) => {
+  const adId = req.params.id
+  const { title, description } = req.body
+  try {
+    await pool.query(
+      'UPDATE ads SET title = $1, description = $2 WHERE id = $3 AND user_id = $4',
+      [title, description, adId, req.user.uid]
+    )
+    res.status(200).json({ message: 'Ad updated' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to update ad' })
+  }
+})
+
+app.delete('/ads/:id', verifyAuth, async (req, res) => {
+  const adId = req.params.id
+  try {
+    await pool.query('DELETE FROM ads WHERE id = $1 AND user_id = $2', [adId, req.user.uid])
+    res.status(200).json({ message: 'Ad deleted' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to delete ad' })
+  }
+})
+
+// Auto-delete ads older than 60 days (run on each startup)
+const deleteOldAds = async () => {
+  try {
+    await pool.query('DELETE FROM ads WHERE created_at < NOW() - INTERVAL '60 days'')
+    console.log('🧹 Old ads deleted (older than 60 days)')
+  } catch (err) {
+    console.error('Failed to delete old ads:', err)
+  }
+}
+deleteOldAds()
 
 const PORT = process.env.PORT || 8080
 app.listen(PORT, '0.0.0.0', () => {
